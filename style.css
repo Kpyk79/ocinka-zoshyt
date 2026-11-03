@@ -48,3 +48,29 @@ nav.tabs svg{width:24px;height:24px;fill:currentColor}
 #toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(88px + env(safe-area-inset-bottom));background:var(--fg);color:var(--bg);padding:12px 18px;border-radius:14px;max-width:calc(100% - 32px);z-index:5}
 .err{color:var(--bad)}
 @media (prefers-reduced-motion:no-preference){.card{animation:in .25s ease-out}@keyframes in{from{opacity:0;transform:translateY(8px)}}}
+.logo{width:96px;height:96px;border-radius:24px;align-self:center}
+.center h1{margin:0;overflow-wrap:anywhere}
+.center .big{max-width:420px;width:100%;align-self:center}
+.ok{color:var(--ok);font-weight:600}
+.hint{text-align:left;max-width:420px;align-self:center}
+.hint ol{margin:6px 0;padding-left:22px;display:flex;flex-direction:column;gap:6px}
+.banner{margin:0 max(16px,env(safe-area-inset-right)) 4px;padding:12px 14px;border-radius:16px;background:var(--surface2);border:1px solid var(--line);display:flex;flex-direction:column;gap:8px;font-size:.95rem}
+.banner.bad{border-color:var(--bad)}
+.banner.bad strong{color:var(--bad)}
+.thread{display:flex;flex-direction:column;gap:10px}
+.msg{background:var(--surface);border:1px solid var(--line);border-radius:18px 18px 18px 6px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;max-width:92%;align-self:flex-start}
+.msg.me{align-self:flex-end;background:var(--pri-soft);color:var(--on-pri-soft);border-radius:18px 18px 6px 18px;border-color:transparent}
+.msg.me .muted{color:inherit;opacity:.75}
+.msg .meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.msg .meta .pill{padding:1px 10px;font-size:.78rem}
+.msg a{color:inherit;text-decoration:underline}
+.file{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:8px}
+.msg.me .file{border-color:rgba(0,0,0,.15)}
+.file img{max-width:100%;border-radius:12px}
+.fname{overflow-wrap:anywhere;font-size:.92rem}
+.file button,.chip button{min-height:40px;padding:0 16px}
+.composer{position:sticky;bottom:calc(84px + env(safe-area-inset-bottom));box-shadow:0 -6px 16px rgba(0,0,0,.08)}
+.composer textarea{min-height:64px}
+.center-text{text-align:center}
+nav.tabs button{position:relative}
+.badge{position:absolute;top:2px;left:calc(50% + 6px);min-width:20px;height:20px;border-radius:10px;background:var(--bad);color:#fff;font-size:.72rem;display:flex;align-items:center;justify-content:center;padding:0 5px}
