@@ -12,6 +12,8 @@ const LS_SEEN = 'ocinka.seenMsg';
 const LS_CADET = 'ocinka.cadetId';
 const LS_PALETTE = 'ocinka.palette';
 const LS_THEME = 'ocinka.theme';
+const LS_REMIND_OFF = 'ocinka.remindOff';
+const LS_REMIND_ASKED = 'ocinka.remindAsked';
 const MAX_FILE = 2.5 * 1024 * 1024;
 const TAB_IDS = ['attendance', 'materials', 'tasks', 'notes'];
 
@@ -197,7 +199,7 @@ function readToken() {
 function saveCache(raw) { store.set(LS_CACHE, raw); }
 function readCache() { try { return JSON.parse(store.get(LS_CACHE) || 'null'); } catch { return null; } }
 function forgetNotebook() {
-  [LS_TOKEN, LS_NOTE, LS_DIRTY, LS_CACHE, LS_SEEN, LS_CADET].forEach(store.del);
+  [LS_TOKEN, LS_NOTE, LS_DIRTY, LS_CACHE, LS_SEEN, LS_CADET, LS_REMIND_OFF, LS_REMIND_ASKED].forEach(store.del);
   state.token = null; state.data = null; state.mode = 'online'; state.drafts = {}; state.sheet = false;
   render();
 }
@@ -419,10 +421,30 @@ async function saveSub(sub) {
   const j = sub.toJSON();
   await rpc('nb_save_push', { p_token: state.token, p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
 }
+async function subscribePush() {
+  const reg = await navigator.serviceWorker.ready;
+  const sub = (await reg.pushManager.getSubscription())
+    || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID_PUBLIC) });
+  await saveSub(sub);
+}
+/* Нагадування увімкнені за замовчуванням: у встановленому застосунку один раз просимо дозвіл
+   (за першим дотиком, цього вимагають браузери); якщо курсант вимкнув їх сам, більше не нав'язуємо. */
 async function resyncPush() {
-  if (state.pushSynced || !pushSupported || Notification.permission !== 'granted') return;
+  if (state.pushSynced || !standalone || !pushSupported || store.get(LS_REMIND_OFF) === '1') return;
   state.pushSynced = true;
-  try { const s = await currentSub(); if (s) await saveSub(s); } catch { state.pushSynced = false; }
+  try {
+    if (Notification.permission === 'granted') {
+      await subscribePush();
+    } else if (Notification.permission === 'default' && store.get(LS_REMIND_ASKED) !== '1') {
+      document.addEventListener('click', async () => {
+        if (store.get(LS_REMIND_ASKED) === '1' || store.get(LS_REMIND_OFF) === '1') return;
+        store.set(LS_REMIND_ASKED, '1');
+        try {
+          if ((await Notification.requestPermission()) === 'granted') { await subscribePush(); state.push.on = true; toast('Нагадування про завдання увімкнено: щодня о 20:00'); }
+        } catch { /* ігноруємо */ }
+      }, { once: true, capture: true });
+    }
+  } catch { state.pushSynced = false; }
 }
 async function toggleReminders() {
   const p = state.push;
@@ -431,14 +453,13 @@ async function toggleReminders() {
     if (p.on) {
       const s = await currentSub();
       if (s) { try { await rpc('nb_delete_push', { p_token: state.token, p_endpoint: s.endpoint }); } catch { /* ignore */ } await s.unsubscribe(); }
+      store.set(LS_REMIND_OFF, '1');
       p.on = false; toast('Нагадування вимкнено');
     } else {
       const perm = await Notification.requestPermission();
       if (perm !== 'granted') throw new Error('Дозвіл на сповіщення не надано');
-      const reg = await navigator.serviceWorker.ready;
-      const sub = (await reg.pushManager.getSubscription())
-        || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID_PUBLIC) });
-      await saveSub(sub);
+      await subscribePush();
+      store.del(LS_REMIND_OFF); store.set(LS_REMIND_ASKED, '1');
       p.on = true; buzz(20); toast('Нагадування увімкнено: щодня о 20:00');
     }
   } catch (e) { toast(e.message || 'Не вдалося змінити нагадування'); }
