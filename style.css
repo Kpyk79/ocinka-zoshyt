@@ -1,0 +1,50 @@
+:root{
+  --bg:#f6f5ec;--surface:#fff;--surface2:#efefe3;--fg:#1b1d17;--muted:#5a5f4d;--line:#cfd3bf;
+  --pri:#3f5e2b;--on-pri:#fff;--pri-soft:#d3eab5;--on-pri-soft:#0f2002;
+  --ok:#2e7d32;--bad:#b3261e;--warn:#7a5f00;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#11130e;--surface:#1d2118;--surface2:#252a1f;--fg:#e6e3d6;--muted:#aeb29e;--line:#3f4535;
+  --pri:#a8c97a;--on-pri:#16240a;--pri-soft:#33472a;--on-pri-soft:#d7ebb8;
+  --ok:#6fc56b;--bad:#ff8f85;--warn:#e0c060;
+  color-scheme:dark;
+}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg)}
+body{font:17px/1.45 Roboto,"Segoe UI",system-ui,-apple-system,sans-serif;-webkit-text-size-adjust:100%;min-height:100dvh}
+#app{max-width:640px;margin:0 auto;min-height:100dvh;display:flex;flex-direction:column}
+header.top{padding:max(14px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 10px max(16px,env(safe-area-inset-left));display:flex;gap:12px;align-items:center}
+header.top .who{flex:1;min-width:0}
+header.top h1{margin:0;font-size:1.2rem;line-height:1.2;overflow-wrap:anywhere}
+header.top small{color:var(--muted);font-size:.85rem}
+main{flex:1;padding:6px max(16px,env(safe-area-inset-right)) 96px max(16px,env(safe-area-inset-left));display:flex;flex-direction:column;gap:12px}
+h2{font-size:1.05rem;margin:10px 0 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.row{display:flex;gap:10px;align-items:center;justify-content:space-between}
+.muted{color:var(--muted);font-size:.9rem}
+.pill{display:inline-block;border-radius:999px;padding:3px 12px;font-size:.85rem;font-weight:600;background:var(--surface2);color:var(--fg);border:1px solid var(--line)}
+.pill.ok{color:var(--ok);border-color:var(--ok)}
+.pill.bad{color:var(--bad);border-color:var(--bad)}
+.pill.warn{color:var(--warn);border-color:var(--warn)}
+button,.btn{font:inherit;font-weight:600;min-height:48px;padding:0 20px;border-radius:999px;border:1px solid var(--line);background:var(--surface2);color:var(--fg);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;gap:8px}
+button.pri,.btn.pri{background:var(--pri);color:var(--on-pri);border-color:transparent}
+button.big{min-height:64px;font-size:1.15rem;width:100%}
+button.ghost{background:none}
+button:disabled{opacity:.55;cursor:default}
+button:focus-visible,textarea:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid var(--pri);outline-offset:2px}
+textarea{font:inherit;width:100%;min-height:120px;padding:12px;border-radius:16px;border:1px solid var(--line);background:var(--bg);color:var(--fg);resize:vertical}
+.body{white-space:pre-wrap;overflow-wrap:anywhere}
+nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);display:flex;padding:6px max(8px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left));max-width:640px;margin:0 auto}
+nav.tabs button{flex:1;flex-direction:column;gap:2px;min-height:56px;border:0;background:none;border-radius:16px;font-size:.78rem;padding:0 4px;color:var(--muted)}
+nav.tabs button[aria-current="page"]{background:var(--pri-soft);color:var(--on-pri-soft)}
+nav.tabs svg{width:24px;height:24px;fill:currentColor}
+.photos{display:flex;gap:8px;flex-wrap:wrap}
+.photos figure{margin:0;position:relative}
+.photos img{width:96px;height:96px;object-fit:cover;border-radius:12px;border:1px solid var(--line);display:block}
+.photos figure button{position:absolute;top:2px;right:2px;min-height:32px;width:32px;padding:0;border-radius:50%;background:var(--surface);font-size:1rem}
+.empty{text-align:center;color:var(--muted);padding:32px 12px}
+.center{flex:1;display:flex;flex-direction:column;justify-content:center;gap:12px;padding:24px;text-align:center}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(88px + env(safe-area-inset-bottom));background:var(--fg);color:var(--bg);padding:12px 18px;border-radius:14px;max-width:calc(100% - 32px);z-index:5}
+.err{color:var(--bad)}
+@media (prefers-reduced-motion:no-preference){.card{animation:in .25s ease-out}@keyframes in{from{opacity:0;transform:translateY(8px)}}}
