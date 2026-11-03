@@ -1,5 +1,5 @@
-/* Кешує лише оболонку застосунку; дані зберігаються окремо в localStorage. */
-const CACHE = 'zoshyt-v2';
+/* Кешує лише оболонку застосунку; дані зберігаються окремо в localStorage. Також показує нагадування (Web Push). */
+const CACHE = 'zoshyt-v3';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -16,4 +16,23 @@ self.addEventListener('fetch', (e) => {
       const copy = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); return r;
     }).catch(() => caches.match(e.request).then((r) => r || caches.match('index.html')))
   );
+});
+
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { /* ignore */ }
+  e.waitUntil(self.registration.showNotification(d.title || 'Зошит', {
+    body: d.body || 'Відкрийте зошит.', icon: 'icon-192.png', badge: 'icon-192.png', tag: 'hw-reminder', renotify: true,
+    data: { url: d.url || './?tab=tasks' },
+  }));
+});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || './?tab=tasks';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    for (const c of list) {
+      if ('focus' in c) { c.postMessage({ tab: 'tasks' }); return c.focus(); }
+    }
+    return self.clients.openWindow(url);
+  }));
 });

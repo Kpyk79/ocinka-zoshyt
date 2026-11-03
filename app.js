@@ -3,13 +3,17 @@
    У браузері показується лише екран встановлення; повний зошит працює в встановленому застосунку. */
 const SB_URL = 'https://scdgemjqvsucvteyrvks.supabase.co';
 const SB_KEY = 'sb_publishable_yCT4VLmKhAWHujKEUc9wSQ_R1JOdjC2';
+const VAPID_PUBLIC = 'BA2ZuaF9htYnJcGrC7kBrsni1gOjNfKbtkE5rEPtixLYsLSxAl_bCYxkQI2T4QLyo6T7irkH1MmDHCfEmQ-iQGA';
 const LS_TOKEN = 'ocinka.token';
 const LS_NOTE = 'ocinka.note';
 const LS_DIRTY = 'ocinka.noteDirty';
 const LS_CACHE = 'ocinka.cache';
 const LS_SEEN = 'ocinka.seenMsg';
 const LS_CADET = 'ocinka.cadetId';
+const LS_PALETTE = 'ocinka.palette';
+const LS_THEME = 'ocinka.theme';
 const MAX_FILE = 2.5 * 1024 * 1024;
+const TAB_IDS = ['attendance', 'materials', 'tasks', 'notes'];
 
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -19,24 +23,35 @@ const store = {
 
 const $app = document.getElementById('app');
 const $toast = document.getElementById('toast');
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const standalone = matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches
   || navigator.standalone === true || /[?&]app=1/.test(location.search);
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const pushSupported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 
 const state = {
   token: null, data: null, raw: '', mode: 'online', // online | offline | gone | error
   tab: 'attendance', open: null, drafts: {}, loading: false, error: '',
   compose: { text: '', file: null, sending: false }, images: {}, installed: false, hint: null,
+  anim: true, sheet: false, sheetFresh: false, push: { on: false, busy: false }, justMarked: null,
+  knownMsg: new Set(), msgReady: false, pushSynced: false,
 };
 let deferredPrompt = null;
 
+const PALETTES = [
+  ['olive', 'Олива', 130], ['sky', 'Небо', 245], ['amber', 'Бурштин', 75],
+  ['rose', 'Троянда', 10], ['violet', 'Фіолет', 300], ['graphite', 'Графіт', null],
+];
+
 const ICONS = {
   attendance: 'M12 12a4 4 0 100-8 4 4 0 000 8zm0 2c-2.7 0-8 1.3-8 4v2h16v-2c0-2.7-5.3-4-8-4z',
-  tasks: 'M3 13h2v-2H3zm0 4h2v-2H3zm0-8h2V7H3zm4 4h14v-2H7zm0 4h14v-2H7zM7 7v2h14V7z',
   materials: 'M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2zM6 9h12v2H6zm8 5H6v-2h8zm4-6H6V6h12z',
+  tasks: 'M3 13h2v-2H3zm0 4h2v-2H3zm0-8h2V7H3zm4 4h14v-2H7zm0 4h14v-2H7zM7 7v2h14V7z',
   notes: 'M3 17.3V21h3.7L17.8 9.9l-3.7-3.7zM20.7 7a1 1 0 000-1.4l-2.3-2.3a1 1 0 00-1.4 0l-1.8 1.8 3.7 3.7z',
+  refresh: 'M17.65 6.35A7.96 7.96 0 0012 4a8 8 0 108 8h-2a6 6 0 11-1.76-4.24L13 11h7V4z',
+  gear: 'M19.4 13a7.7 7.7 0 000-2l2.1-1.6a.5.5 0 00.1-.6l-2-3.5a.5.5 0 00-.6-.2l-2.5 1a7.3 7.3 0 00-1.7-1l-.4-2.6a.5.5 0 00-.5-.4h-4a.5.5 0 00-.5.4L9 5.1a7.3 7.3 0 00-1.7 1l-2.5-1a.5.5 0 00-.6.2l-2 3.5a.5.5 0 00.1.6L4.6 11a7.7 7.7 0 000 2l-2.1 1.6a.5.5 0 00-.1.6l2 3.5c.1.2.4.3.6.2l2.5-1c.5.4 1.1.7 1.7 1l.4 2.6c0 .2.2.4.5.4h4c.3 0 .5-.2.5-.4l.4-2.6c.6-.3 1.2-.6 1.7-1l2.5 1c.2.1.5 0 .6-.2l2-3.5a.5.5 0 00-.1-.6zM12 15.5a3.5 3.5 0 110-7 3.5 3.5 0 010 7z',
 };
-const TABS = [['attendance', 'Присутність'], ['tasks', 'Завдання'], ['materials', 'Матеріали'], ['notes', 'Нотатки']];
+const TABS = [['attendance', 'Присутність'], ['materials', 'Матеріали'], ['tasks', 'Завдання'], ['notes', 'Нотатки']];
 
 /* ---------- утиліти ---------- */
 function h(tag, attrs, ...kids) {
@@ -51,16 +66,54 @@ function h(tag, attrs, ...kids) {
   for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(kid));
   return el;
 }
+function svgIcon(path, cls) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+  if (cls) svg.setAttribute('class', cls);
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', path); svg.append(p);
+  return svg;
+}
+function checkMark(draw) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 28 28'); svg.setAttribute('class', draw ? 'check draw' : 'check'); svg.setAttribute('aria-hidden', 'true');
+  const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); c.setAttribute('cx', '14'); c.setAttribute('cy', '14'); c.setAttribute('r', '13');
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', 'M8 14.5l4 4 8-9');
+  svg.append(c, p);
+  return svg;
+}
 function toast(msg) {
   $toast.textContent = msg; $toast.hidden = false;
   clearTimeout(toast.t); toast.t = setTimeout(() => { $toast.hidden = true; }, 2600);
+}
+function buzz(ms) { try { if (navigator.vibrate) navigator.vibrate(ms || 15); } catch { /* ignore */ } }
+function confetti(x, y) {
+  if (reduceMotion) return;
+  const box = h('div', { class: 'confetti' });
+  box.style.left = `${x}px`; box.style.top = `${y}px`;
+  for (let i = 0; i < 28; i++) {
+    const a = Math.random() * Math.PI * 2, v = 70 + Math.random() * 130;
+    const p = document.createElement('i');
+    p.style.setProperty('--dx', `${Math.cos(a) * v}px`);
+    p.style.setProperty('--dy', `${Math.sin(a) * v - 90}px`);
+    p.style.setProperty('--r', `${Math.random() * 720 - 360}deg`);
+    p.style.background = `oklch(${62 + Math.random() * 22}% .17 ${Math.floor(Math.random() * 360)})`;
+    box.append(p);
+  }
+  document.body.append(box);
+  setTimeout(() => box.remove(), 1100);
 }
 function fmtDay(iso) {
   const d = new Date(iso + 'T12:00:00');
   return d.toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit', weekday: 'short' });
 }
-function fmtTime(iso) {
-  return new Date(iso).toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+function fmtTime(iso) { return new Date(iso).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }); }
+function dayLabel(iso) {
+  const d = new Date(iso), now = new Date();
+  const key = (x) => `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`;
+  if (key(d) === key(now)) return 'Сьогодні';
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (key(d) === key(y)) return 'Вчора';
+  return d.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' });
 }
 function fmtSize(b) { return b >= 1048576 ? `${(b / 1048576).toFixed(1).replace('.', ',')} МБ` : `${Math.max(1, Math.round(b / 1024))} КБ`; }
 function safeUrl(u) { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : null; } catch { return null; } }
@@ -75,6 +128,16 @@ function linkify(text) {
   }
   out.push(text.slice(last));
   return out;
+}
+function nameParts(full) {
+  const p = (full || '').trim().split(/\s+/).filter(Boolean);
+  return { surname: p[0] || '', given: p[1] || '', initials: ((p[0] || '')[0] || '') + ((p[1] || '')[0] || '') };
+}
+function greeting(full) {
+  const hr = new Date().getHours();
+  const g = hr < 5 ? 'Доброї ночі' : hr < 12 ? 'Доброго ранку' : hr < 18 ? 'Доброго дня' : 'Добрий вечір';
+  const n = nameParts(full).given;
+  return n ? `${g}, ${n}!` : `${g}!`;
 }
 
 async function rpc(fn, args) {
@@ -97,6 +160,28 @@ async function rpc(fn, args) {
   return r.json();
 }
 
+/* ---------- вигляд: палітра й тема ---------- */
+function cssToHex(color) {
+  try {
+    const c = document.createElement('canvas'); c.width = c.height = 1;
+    const ctx = c.getContext('2d'); ctx.fillStyle = color; ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+    return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  } catch { return null; }
+}
+function applyPrefs() {
+  const root = document.documentElement;
+  const pal = store.get(LS_PALETTE), theme = store.get(LS_THEME);
+  if (pal && pal !== 'olive') root.dataset.palette = pal; else delete root.dataset.palette;
+  if (theme === 'light' || theme === 'dark') root.dataset.theme = theme; else delete root.dataset.theme;
+  setTimeout(() => {
+    const hex = cssToHex(getComputedStyle(root).getPropertyValue('--pri').trim());
+    const meta = document.querySelector('meta[name=theme-color]');
+    if (hex && meta) meta.setAttribute('content', hex);
+  }, 50);
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyPrefs);
+
 /* ---------- токен і кеш ---------- */
 function readToken() {
   const m = location.hash.match(/t=([A-Za-z0-9]{16,})/);
@@ -112,7 +197,7 @@ function saveCache(raw) { store.set(LS_CACHE, raw); }
 function readCache() { try { return JSON.parse(store.get(LS_CACHE) || 'null'); } catch { return null; } }
 function forgetNotebook() {
   [LS_TOKEN, LS_NOTE, LS_DIRTY, LS_CACHE, LS_SEEN, LS_CADET].forEach(store.del);
-  state.token = null; state.data = null; state.mode = 'online'; state.drafts = {};
+  state.token = null; state.data = null; state.mode = 'online'; state.drafts = {}; state.sheet = false;
   render();
 }
 
@@ -133,6 +218,7 @@ async function load(silent) {
       if (store.get(LS_CADET) && store.get(LS_CADET) !== d.cadet.id) { store.del(LS_NOTE); store.del(LS_DIRTY); store.del(LS_SEEN); }
       store.set(LS_CADET, d.cadet.id);
       if (store.get(LS_DIRTY) === '1') syncNote();
+      resyncPush();
     }
   } catch (e) {
     if (!state.data) state.data = readCache();
@@ -152,15 +238,14 @@ let installPrepared = false;
 function prepareInstall(c) {
   if (installPrepared) return;
   installPrepared = true;
-  const short = (c.full_name || '').trim().split(/\s+/)[0] || 'Зошит';
-  document.title = c.full_name;
+  document.title = 'Зошит';
   if (isIOS) {
     // iOS бере ім'я й адресу (з токеном у хеші) зі сторінки, а не з маніфесту.
     document.head.append(h('meta', { name: 'apple-mobile-web-app-capable', content: 'yes' }),
-      h('meta', { name: 'apple-mobile-web-app-title', content: short }),
+      h('meta', { name: 'apple-mobile-web-app-title', content: 'Зошит' }),
       h('meta', { name: 'apple-mobile-web-app-status-bar-style', content: 'default' }));
   } else if (c.pub_id) {
-    // Особистий маніфест (ім'я курсанта) віддає сервер за публічним id, не за токеном.
+    // Маніфест віддає сервер за публічним id (не за токеном).
     document.head.append(h('link', { rel: 'manifest', href: `${SB_URL}/rest/v1/rpc/nb_manifest?p_pub=${encodeURIComponent(c.pub_id)}&apikey=${SB_KEY}` }));
   }
 }
@@ -203,9 +288,12 @@ function viewLanding() {
     hint);
 }
 
-/* ---------- екрани ---------- */
+/* ---------- каркас ---------- */
 function centerMsg(title, text, extra) {
   return h('div', { class: 'center' }, h('h1', { text: title }), h('p', { text }), extra || null);
+}
+function skeleton() {
+  return h('div', { class: 'center' }, h('div', { class: 'skeleton' }), h('div', { class: 'skeleton' }), h('div', { class: 'skeleton' }));
 }
 function render() {
   const active = document.activeElement;
@@ -213,7 +301,8 @@ function render() {
   const selStart = activeId && active.selectionStart != null ? active.selectionStart : null;
   const selEnd = activeId && active.selectionEnd != null ? active.selectionEnd : null;
   $app.replaceChildren();
-  build();
+  $app.append(...build().filter(Boolean));
+  state.anim = false; state.sheetFresh = false;
   if (activeId) {
     const el = document.getElementById(activeId);
     if (el) { el.focus({ preventScroll: true }); if (selStart != null && el.setSelectionRange) try { el.setSelectionRange(selStart, selEnd); } catch { /* ignore */ } }
@@ -221,79 +310,188 @@ function render() {
 }
 function build() {
   if (!state.token) {
-    $app.append(centerMsg('Зошит курсанта', 'Відскануйте особистий QR-код, який дав інструктор.',
-      h('p', { class: 'muted', text: 'Якщо код не працює, попросіть інструктора створити новий.' })));
-    return;
+    return [centerMsg('Зошит курсанта', 'Відскануйте особистий QR-код, який дав інструктор.',
+      h('p', { class: 'muted', text: 'Якщо код не працює, попросіть інструктора створити новий.' }))];
   }
   if (state.mode === 'error' && !state.data) {
-    $app.append(h('div', { class: 'center' }, h('p', { class: 'err', text: state.error }), h('button', { class: 'pri', onclick: () => load(), text: 'Спробувати ще' })));
-    return;
+    return [h('div', { class: 'center' }, h('p', { class: 'err', text: state.error }), h('button', { class: 'pri', onclick: () => load(), text: 'Спробувати ще' }))];
   }
   if (!standalone) {
-    if (state.mode === 'gone' || (!state.data)) {
-      $app.append(state.mode === 'gone'
-        ? centerMsg('Посилання не діє', 'Цей зошит більше не підключений до навчальної групи. Попросіть інструктора новий QR-код.')
-        : h('div', { class: 'center' }, h('p', { class: 'muted', text: 'Завантаження…' })));
-      return;
-    }
-    $app.append(viewLanding());
-    return;
+    if (state.mode === 'gone') return [centerMsg('Посилання не діє', 'Цей зошит більше не підключений до навчальної групи. Попросіть інструктора новий QR-код.')];
+    if (!state.data) return [skeleton()];
+    return [viewLanding()];
   }
   if (!state.data) {
-    $app.append(state.mode === 'gone'
-      ? centerMsg('Зошит відключено', 'Цей зошит більше не підключений до навчальної групи.')
-      : h('div', { class: 'center' }, h('p', { class: 'muted', text: 'Завантаження…' })));
-    return;
+    return [state.mode === 'gone' ? centerMsg('Зошит відключено', 'Цей зошит більше не підключений до навчальної групи.') : skeleton()];
   }
   const c = state.data.cadet, gone = state.mode === 'gone';
   const tabs = gone ? TABS.filter(([id]) => id !== 'attendance') : TABS;
   if (!tabs.some(([id]) => id === state.tab)) state.tab = tabs[0][0];
   const unread = unreadCount();
-  $app.append(
+  const main = h('main', { class: state.anim ? 'enter' : null }, state.error ? h('p', { class: 'err', text: state.error }) : null, ({
+    attendance: viewAttendance, tasks: viewTasks, materials: viewMessages, notes: viewNotes,
+  })[state.tab]());
+  [...main.children].forEach((el, i) => el.style.setProperty('--i', Math.min(i, 8)));
+
+  const parts = [
     h('header', { class: 'top' },
-      h('div', { class: 'who' }, h('h1', { text: c.full_name }), h('small', { text: c.rank || 'Курсант' })),
-      gone ? null : h('button', { class: 'ghost', 'aria-label': 'Оновити', onclick: () => load(), text: state.loading ? '…' : 'Оновити' })),
+      h('div', { class: 'avatar', 'aria-hidden': 'true', text: nameParts(c.full_name).initials.toUpperCase() }),
+      h('div', { class: 'who' }, h('small', { class: 'hello', text: greeting(c.full_name) }), h('h1', { text: c.full_name }), h('small', { text: c.rank || 'Курсант' })),
+      gone ? null : h('button', { class: state.loading ? 'icon-btn spin' : 'icon-btn', 'aria-label': 'Оновити', onclick: () => load() }, svgIcon(ICONS.refresh)),
+      h('button', { class: 'icon-btn', 'aria-label': 'Налаштування', onclick: openSheet }, svgIcon(ICONS.gear))),
     gone ? h('div', { class: 'banner bad' },
       h('strong', { text: 'Зошит відключено від навчальної групи' }),
       h('span', { text: 'Нові дані не надходять. Ваші нотатки, завдання й повідомлення лишаються на цьому телефоні.' }),
       h('button', { onclick: () => { if (confirm('Видалити зошит з цього пристрою разом з нотатками?')) forgetNotebook(); }, text: 'Видалити зошит з пристрою' }))
-      : state.mode === 'offline' ? h('div', { class: 'banner' }, h('span', { text: 'Немає звʼязку. Показано збережені дані.' })) : '',
-    h('main', null, state.error ? h('p', { class: 'err', text: state.error }) : null, ({
-      attendance: viewAttendance, tasks: viewTasks, materials: viewMessages, notes: viewNotes,
-    })[state.tab]()),
-    h('nav', { class: 'tabs' }, tabs.map(([id, label]) => {
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
-      const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', ICONS[id]); svg.append(p);
+      : state.mode === 'offline' ? h('div', { class: 'banner' }, h('span', { text: 'Немає звʼязку. Показано збережені дані.' })) : null,
+    main,
+    h('nav', { class: state.anim ? 'tabs anim' : 'tabs' }, tabs.map(([id, label]) => {
       const badge = id === 'materials' && unread > 0 && state.tab !== 'materials' ? h('span', { class: 'badge', text: String(unread) }) : null;
-      return h('button', { 'aria-current': state.tab === id ? 'page' : null, onclick: () => { state.tab = id; render(); if (id === 'materials') scrollEnd(); else window.scrollTo(0, 0); } }, svg, label, badge);
-    })));
+      return h('button', { 'aria-current': state.tab === id ? 'page' : null, onclick: () => goTab(id) }, svgIcon(ICONS[id]), label, badge);
+    })),
+    state.sheet ? sheetView() : null,
+  ];
   if (state.tab === 'materials') markSeen();
+  return parts;
+}
+function goTab(id) {
+  if (state.tab === id) return;
+  state.tab = id; state.anim = true; buzz(8); render();
+  if (id === 'materials') scrollEnd(); else window.scrollTo(0, 0);
+}
+
+/* ---------- налаштування ---------- */
+function openSheet() { state.sheet = true; state.sheetFresh = true; render(); refreshPush(); }
+function closeSheet() { state.sheet = false; render(); }
+function sheetView() {
+  const pal = store.get(LS_PALETTE) || 'olive', theme = store.get(LS_THEME) || 'auto';
+  const gone = state.mode === 'gone';
+  const sheet = h('div', { class: state.sheetFresh ? 'sheet fresh' : 'sheet', role: 'dialog', 'aria-label': 'Налаштування' },
+    h('div', { class: 'grip' }),
+    h('div', { class: 'row' }, h('h2', { text: 'Налаштування' }), h('button', { class: 'ghost', onclick: closeSheet, text: 'Готово' })),
+    h('div', null, h('strong', { text: 'Колір' }),
+      h('div', { class: 'swatches', style: 'margin-top:10px' }, PALETTES.map(([id, label, hue]) => h('button', {
+        class: 'swatch', 'aria-label': label, title: label, 'aria-pressed': pal === id ? 'true' : 'false',
+        style: `background:oklch(55% ${hue == null ? '.02' : '.14'} ${hue == null ? 130 : hue})`,
+        onclick: () => { store.set(LS_PALETTE, id); applyPrefs(); buzz(10); render(); },
+      })))),
+    h('div', null, h('strong', { text: 'Тема' }),
+      h('div', { class: 'seg', style: 'margin-top:10px' }, [['auto', 'Авто'], ['light', 'Світла'], ['dark', 'Темна']].map(([id, label]) => h('button', {
+        'aria-pressed': theme === id ? 'true' : 'false',
+        onclick: () => { if (id === 'auto') store.del(LS_THEME); else store.set(LS_THEME, id); applyPrefs(); render(); },
+        text: label,
+      })))),
+    gone ? null : reminderRow());
+  return h('div', null, h('div', { class: state.sheetFresh ? 'backdrop fresh' : 'backdrop', onclick: closeSheet }), sheet);
+}
+function reminderRow() {
+  const p = state.push;
+  let sub = 'Щодня о 20:00, якщо є невиконане домашнє завдання.';
+  let disabled = p.busy;
+  if (!pushSupported) {
+    sub = isIOS && !standalone ? 'На iPhone працює після додавання на екран «Додому».' : 'Цей браузер не підтримує сповіщення.';
+    disabled = true;
+  } else if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+    sub = 'Сповіщення заблоковано в налаштуваннях телефона.'; disabled = true;
+  }
+  return h('div', { class: 'row' },
+    h('div', null, h('strong', { text: 'Нагадування про завдання' }), h('div', { class: 'muted', text: sub })),
+    h('button', { class: 'switch', role: 'switch', 'aria-label': 'Нагадування', 'aria-checked': p.on ? 'true' : 'false', disabled, onclick: toggleReminders }));
+}
+
+/* ---------- нагадування (Web Push) ---------- */
+function b64ToBytes(s) {
+  const pad = '='.repeat((4 - (s.length % 4)) % 4);
+  const raw = atob((s + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+async function currentSub() {
+  if (!pushSupported) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+async function refreshPush() {
+  try { state.push.on = !!(await currentSub()) && Notification.permission === 'granted'; } catch { state.push.on = false; }
+  if (state.sheet) render();
+}
+async function saveSub(sub) {
+  const j = sub.toJSON();
+  await rpc('nb_save_push', { p_token: state.token, p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
+}
+async function resyncPush() {
+  if (state.pushSynced || !pushSupported || Notification.permission !== 'granted') return;
+  state.pushSynced = true;
+  try { const s = await currentSub(); if (s) await saveSub(s); } catch { state.pushSynced = false; }
+}
+async function toggleReminders() {
+  const p = state.push;
+  p.busy = true; render();
+  try {
+    if (p.on) {
+      const s = await currentSub();
+      if (s) { try { await rpc('nb_delete_push', { p_token: state.token, p_endpoint: s.endpoint }); } catch { /* ignore */ } await s.unsubscribe(); }
+      p.on = false; toast('Нагадування вимкнено');
+    } else {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') throw new Error('Дозвіл на сповіщення не надано');
+      const reg = await navigator.serviceWorker.ready;
+      const sub = (await reg.pushManager.getSubscription())
+        || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID_PUBLIC) });
+      await saveSub(sub);
+      p.on = true; buzz(20); toast('Нагадування увімкнено: щодня о 20:00');
+    }
+  } catch (e) { toast(e.message || 'Не вдалося змінити нагадування'); }
+  p.busy = false; render();
 }
 
 /* ---------- присутність ---------- */
+function ringSvg(frac) {
+  const C = 2 * Math.PI * 34;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 84 84'); svg.setAttribute('class', 'ring'); svg.setAttribute('aria-hidden', 'true');
+  svg.style.setProperty('--c', C.toFixed(1)); svg.style.setProperty('--off', (C * (1 - frac)).toFixed(1));
+  for (const cls of ['bg', 'fg']) {
+    const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c.setAttribute('class', cls); c.setAttribute('cx', '42'); c.setAttribute('cy', '42'); c.setAttribute('r', '34');
+    svg.append(c);
+  }
+  return svg;
+}
 function viewAttendance() {
   const { days, today, attendance } = state.data;
   if (!days.length) return h('p', { class: 'empty', text: 'Інструктор ще не вказав дні навчань.' });
   const offline = state.mode !== 'online';
-  return days.map((day, i) => {
-    const isToday = day === today, past = day < today, present = attendance[day] === true;
-    const status = present ? h('span', { class: 'pill ok', text: 'Присутній' })
+  const elapsed = days.filter((d) => d <= today);
+  const present = elapsed.filter((d) => attendance[d] === true).length;
+  const frac = elapsed.length ? present / elapsed.length : 0;
+  const summary = h('section', { class: 'card summary' }, ringSvg(frac),
+    h('div', null,
+      h('div', { class: 'big-n', text: `${present} з ${elapsed.length || days.length}` }),
+      h('div', { class: 'muted', text: elapsed.length ? 'днів ви були на занятті' : 'навчання ще не почалось' })));
+  const list = days.map((day, i) => {
+    const isToday = day === today, past = day < today, isPresent = attendance[day] === true;
+    const status = isPresent ? h('span', { class: 'pill ok', text: 'Присутній' })
       : past ? h('span', { class: 'pill bad', text: 'Не відмічено' })
         : h('span', { class: 'pill', text: isToday ? 'Чекає відмітки' : 'Ще не настав' });
-    return h('section', { class: 'card' },
-      h('div', { class: 'row' }, h('strong', { text: `День ${i + 1} • ${fmtDay(day)}` }), status),
+    return h('section', { class: `card day${isToday ? ' today' : ''}${isPresent ? ' present' : ''}` },
+      h('div', { class: 'row' },
+        h('div', { class: 'row', style: 'justify-content:flex-start' }, isPresent ? checkMark(state.justMarked === day) : null, h('strong', { text: `День ${i + 1} • ${fmtDay(day)}` })),
+        status),
       isToday ? h('button', {
-        class: present ? 'big' : 'big pri', disabled: offline,
-        onclick: () => mark(day, !present),
-        text: present ? 'Зняти відмітку' : 'Я на занятті',
+        class: isPresent ? 'big' : 'big pri', disabled: offline,
+        onclick: (e) => mark(day, !isPresent, e),
+        text: isPresent ? 'Зняти відмітку' : 'Я на занятті',
       }) : null);
   });
+  return [summary, ...list];
 }
-async function mark(day, present) {
+async function mark(day, present, ev) {
+  const x = ev ? ev.clientX : innerWidth / 2, y = ev ? ev.clientY : innerHeight / 2;
   try {
     await rpc('nb_mark_attendance', { p_token: state.token, p_day: day, p_present: present });
-    state.data.attendance[day] = present; state.raw = ''; render();
+    state.data.attendance[day] = present; state.raw = '';
+    state.justMarked = present ? day : null; render();
+    if (present) { confetti(x, y); buzz([20, 30, 20]); }
     toast(present ? 'Присутність відмічено' : 'Відмітку знято');
   } catch (e) { toast(e.message === 'INVALID_TOKEN' ? 'Зошит відключено від групи' : e.message); }
 }
@@ -311,22 +509,30 @@ function markSeen() {
   const newest = newestFromInstructor();
   if (newest && newest > (store.get(LS_SEEN) || '')) store.set(LS_SEEN, newest);
 }
-function scrollEnd() { setTimeout(() => window.scrollTo(0, document.body.scrollHeight), 30); }
+function scrollEnd() { setTimeout(() => window.scrollTo({ top: document.body.scrollHeight, behavior: reduceMotion ? 'auto' : 'smooth' }), 40); }
 
 function viewMessages() {
   const list = state.data.messages || [];
   const online = state.mode === 'online';
   const out = [];
   if (!list.length) out.push(h('p', { class: 'empty', text: 'Повідомлень поки немає.' }));
-  for (const m of list) out.push(bubble(m));
+  let lastDay = '';
+  for (const m of list) {
+    const dl = dayLabel(m.created_at);
+    if (dl !== lastDay) { out.push(h('div', { class: 'day-sep', text: dl })); lastDay = dl; }
+    out.push(bubble(m));
+    state.knownMsg.add(m.id);
+  }
+  state.msgReady = true;
   if (online) out.push(composer());
   else if (state.mode === 'gone') out.push(h('p', { class: 'muted center-text', text: 'Листування закрито: зошит відключено від групи.' }));
   return h('div', { class: 'thread' }, out);
 }
 function bubble(m) {
   const mine = m.sender === 'cadet';
+  const isNew = state.msgReady && !state.knownMsg.has(m.id);
   const file = m.file_name ? fileRow(m) : null;
-  return h('article', { class: mine ? 'msg me' : 'msg' },
+  return h('article', { class: `msg${mine ? ' me' : ''}${isNew ? ' new' : ''}` },
     h('div', { class: 'meta' },
       h('strong', { text: mine ? 'Ви' : 'Інструктор' }),
       !mine ? h('span', { class: 'pill', text: m.personal ? 'особисто вам' : 'усім' }) : null,
@@ -343,14 +549,10 @@ function fileRow(m) {
       h('span', { class: 'fname', text: `${m.file_name} • ${fmtSize(m.file_size || 0)}` }),
       state.mode === 'online' ? h('button', { onclick: () => openFile(m, isImage), text: isImage && !img ? 'Показати' : 'Завантажити' }) : null));
 }
-async function fetchFile(m) {
-  const r = await rpc('nb_message_file', { p_token: state.token, p_id: m.id });
-  if (!r) throw new Error('Файл недоступний');
-  return r;
-}
 async function openFile(m, isImage) {
   try {
-    const r = await fetchFile(m);
+    const r = await rpc('nb_message_file', { p_token: state.token, p_id: m.id });
+    if (!r) throw new Error('Файл недоступний');
     const mime = r.mime || 'application/octet-stream';
     if (isImage && !state.images[m.id]) { state.images[m.id] = `data:${mime};base64,${r.data}`; return render(); }
     const bytes = Uint8Array.from(atob(r.data), (ch) => ch.charCodeAt(0));
@@ -360,24 +562,28 @@ async function openFile(m, isImage) {
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   } catch (e) { toast(e.message || 'Не вдалося відкрити файл'); }
 }
+function autogrow(ta) { ta.style.height = 'auto'; ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`; }
+const QUICK = ['Зрозумів', 'Прибув', 'Потрібна допомога', 'Дякую'];
 function composer() {
   const c = state.compose;
   const canSend = () => !c.sending && (c.text.trim() !== '' || !!c.file);
   const send = h('button', { class: 'pri', disabled: !canSend(), onclick: sendMessage, text: c.sending ? 'Надсилання…' : 'Надіслати' });
-  const ta = h('textarea', { id: 'msgbox', 'aria-label': 'Повідомлення інструктору', placeholder: 'Напишіть інструктору…', rows: 2, oninput: (e) => { c.text = e.target.value; send.disabled = !canSend(); } });
+  const ta = h('textarea', { id: 'msgbox', 'aria-label': 'Повідомлення інструктору', placeholder: 'Напишіть інструктору…', rows: 1, oninput: (e) => { c.text = e.target.value; send.disabled = !canSend(); autogrow(e.target); } });
   ta.value = c.text;
+  queueMicrotask(() => autogrow(ta));
   const picker = h('input', { type: 'file', hidden: true, onchange: async (e) => {
     const f = e.target.files[0]; e.target.value = '';
     if (f) await attach(f);
   } });
   return h('section', { class: 'composer card' },
-    c.file ? h('div', { class: 'row chip' },
+    c.file ? h('div', { class: 'row chiprow' },
       h('span', { class: 'fname', text: `${c.file.name} • ${fmtSize(c.file.size)}` }),
       h('button', { class: 'ghost', 'aria-label': 'Прибрати файл', onclick: () => { c.file = null; render(); }, text: '×' })) : null,
+    h('div', { class: 'chips' }, QUICK.map((q) => h('button', { class: 'chip', onclick: () => {
+      c.text = c.text ? `${c.text} ${q}` : q; ta.value = c.text; send.disabled = !canSend(); autogrow(ta); ta.focus(); buzz(6);
+    }, text: q }))),
     ta, picker,
-    h('div', { class: 'row' },
-      h('button', { onclick: () => picker.click(), disabled: c.sending, text: 'Додати файл' }),
-      send));
+    h('div', { class: 'row' }, h('button', { onclick: () => picker.click(), disabled: c.sending, text: 'Додати файл' }), send));
 }
 async function attach(f) {
   try {
@@ -405,7 +611,7 @@ async function sendMessage() {
       p_token: state.token, p_body: c.text.trim(),
       p_file_name: c.file ? c.file.name : null, p_file_mime: c.file ? c.file.mime : null, p_file_data: c.file ? c.file.data : null,
     });
-    c.text = ''; c.file = null; c.sending = false;
+    c.text = ''; c.file = null; c.sending = false; buzz(12);
     await load(true);
     render(); scrollEnd();
   } catch (e) {
@@ -422,8 +628,11 @@ function draftFor(t) {
 function viewTasks() {
   const tasks = state.data.tasks;
   if (!tasks.length) return h('p', { class: 'empty', text: 'Завдань поки немає.' });
+  const doneN = tasks.filter((t) => t.done).length;
+  const out = [h('section', { class: 'card' },
+    h('div', { class: 'row' }, h('strong', { text: doneN === tasks.length ? 'Усе виконано' : 'Ваш прогрес' }), h('span', { class: 'muted', text: `${doneN} з ${tasks.length}` })),
+    h('div', { class: 'bar', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': tasks.length, 'aria-valuenow': doneN, style: `--w:${Math.round(doneN / tasks.length * 100)}%` }, h('i')))];
   const days = [...new Set(tasks.map((t) => t.day))];
-  const out = [];
   for (const day of days) {
     out.push(h('h2', { text: fmtDay(day) }));
     for (const t of tasks.filter((x) => x.day === day)) out.push(taskCard(t));
@@ -432,14 +641,15 @@ function viewTasks() {
 }
 function taskCard(t) {
   const d = draftFor(t), open = state.open === t.id;
-  const badge = t.done ? h('span', { class: 'pill ok', text: 'Виконано' }) : h('span', { class: 'pill', text: 'Не виконано' });
-  const head = h('div', { class: 'row' }, h('div', { class: 'body', text: t.text }), badge);
+  const badge = t.done ? h('span', { class: 'pill ok', text: 'Виконано' }) : h('span', { class: 'pill warn', text: 'Не виконано' });
+  const head = h('div', { class: 'row' }, h('div', { class: 'body task-text', text: t.text }), badge);
+  const cls = `card task ${t.done ? 'done' : 'todo'}`;
   if (state.mode !== 'online') {
-    return h('article', { class: 'card' }, head, t.answer ? h('div', { class: 'body muted', text: `Ваша відповідь: ${t.answer}` }) : null);
+    return h('article', { class: cls }, head, t.answer ? h('div', { class: 'body muted', text: `Ваша відповідь: ${t.answer}` }) : null);
   }
   if (!open) {
-    return h('article', { class: 'card' }, head,
-      h('button', { onclick: () => openTask(t), text: t.done ? 'Переглянути відповідь' : 'Виконати' }));
+    return h('article', { class: cls }, head,
+      h('button', { class: t.done ? '' : 'pri', onclick: () => openTask(t), text: t.done ? 'Переглянути відповідь' : 'Виконати' }));
   }
   const photosReady = d.photos !== null;
   const ta = h('textarea', { id: `ans-${t.id}`, 'aria-label': 'Ваша відповідь', placeholder: 'Напишіть відповідь або додайте фото рукописного тексту', oninput: (e) => { d.answer = e.target.value; } });
@@ -450,16 +660,16 @@ function taskCard(t) {
     if (d.photos.length >= 3) return toast('Можна додати не більше 3 фото');
     try { d.photos.push(await compress(f)); render(); } catch { toast('Не вдалося обробити фото'); }
   } });
-  return h('article', { class: 'card' }, head, ta,
+  return h('article', { class: cls }, head, ta,
     photosReady ? h('div', { class: 'photos' }, d.photos.map((src, i) => h('figure', null,
       h('img', { src, alt: `Фото ${i + 1}` }),
-      h('button', { 'aria-label': 'Видалити фото', onclick: () => { d.photos.splice(i, 1); render(); }, text: '×' })))) : h('p', { class: 'muted', text: 'Завантаження фото…' }),
+      h('button', { 'aria-label': 'Видалити фото', onclick: () => { d.photos.splice(i, 1); render(); }, text: '×' })))) : h('div', { class: 'skeleton', style: 'height:48px' }),
     file,
-    h('button', { disabled: !photosReady || d.photos.length >= 3, onclick: () => file.click(), text: 'Додати фото' }),
+    h('button', { disabled: !photosReady || d.photos.length >= 3, onclick: () => file.click(), text: `Додати фото${photosReady ? ` (${d.photos.length}/3)` : ''}` }),
     h('div', { class: 'row' },
       h('button', { class: 'ghost', onclick: () => { state.open = null; render(); }, text: 'Згорнути' }),
-      h('button', { class: 'pri', disabled: !photosReady || d.saving, onclick: () => save(t, d, true), text: d.saving ? 'Збереження…' : 'Здати' })),
-    h('button', { disabled: !photosReady || d.saving, onclick: () => save(t, d, false), text: 'Зберегти чернетку' }));
+      h('button', { class: 'pri', disabled: !photosReady || d.saving, onclick: (e) => save(t, d, true, e), text: d.saving ? 'Збереження…' : 'Здати' })),
+    h('button', { disabled: !photosReady || d.saving, onclick: (e) => save(t, d, false, e), text: 'Зберегти чернетку' }));
 }
 async function openTask(t) {
   state.open = t.id; const d = draftFor(t); render();
@@ -468,13 +678,14 @@ async function openTask(t) {
   try { d.photos = (await rpc('nb_task_photos', { p_token: state.token, p_task: t.id })) || []; } catch { d.photos = []; toast('Не вдалося завантажити фото'); }
   render();
 }
-async function save(t, d, done) {
+async function save(t, d, done, ev) {
+  const x = ev ? ev.clientX : innerWidth / 2, y = ev ? ev.clientY : innerHeight / 2;
   d.saving = true; render();
   try {
     await rpc('nb_submit', { p_token: state.token, p_task: t.id, p_answer: d.answer, p_photos: d.photos, p_done: done });
     t.answer = d.answer; t.done = done; t.photo_count = d.photos.length; d.done = done; state.raw = '';
-    if (done) state.open = null;
-    toast(done ? 'Завдання здано' : 'Чернетку збережено');
+    if (done) { state.open = null; confetti(x, y); buzz([20, 30, 20]); }
+    toast(done ? 'Завдання здано. Так тримати!' : 'Чернетку збережено');
   } catch (e) { toast(e.message); }
   d.saving = false; render();
 }
@@ -502,15 +713,26 @@ async function syncNote() {
     return true;
   } catch { return false; }
 }
+function insertAtCursor(ta, text) {
+  const s = ta.selectionStart ?? ta.value.length, e = ta.selectionEnd ?? s;
+  const needNl = s > 0 && ta.value[s - 1] !== '\n' && text.startsWith('\n');
+  const ins = needNl ? text : text.replace(/^\n/, '');
+  ta.value = ta.value.slice(0, s) + ins + ta.value.slice(e);
+  const pos = s + ins.length;
+  ta.focus(); ta.setSelectionRange(pos, pos);
+  ta.dispatchEvent(new Event('input'));
+}
 function viewNotes() {
   const online = state.mode === 'online';
   const local = store.get(LS_NOTE), dirty = store.get(LS_DIRTY) === '1';
   const server = state.data.note || '';
-  const ta = h('textarea', { id: 'notebox', 'aria-label': 'Мої нотатки', placeholder: 'Ваші особисті нотатки. Їх бачите лише ви.', style: 'min-height:50vh' });
+  const ta = h('textarea', { id: 'notebox', 'aria-label': 'Мої нотатки', placeholder: 'Ваші особисті нотатки. Їх бачите лише ви.', style: 'min-height:46vh' });
   ta.value = online ? (dirty && local != null ? local : server) : (local != null ? local : server);
   const status = h('span', { class: 'muted', text: online ? (dirty ? 'Не збережено' : 'Збережено') : 'Зберігається на цьому телефоні' });
+  const counter = h('span', { class: 'muted counter', text: `${ta.value.length} символів` });
   ta.addEventListener('input', () => {
     store.set(LS_NOTE, ta.value);
+    counter.textContent = `${ta.value.length} символів`;
     if (!online) { status.textContent = 'Зберігається на цьому телефоні'; return; }
     store.set(LS_DIRTY, '1'); status.textContent = 'Збереження…';
     clearTimeout(noteTimer);
@@ -518,11 +740,23 @@ function viewNotes() {
       status.textContent = (await syncNote()) ? 'Збережено' : 'Не збережено (немає звʼязку), чернетка на цьому пристрої';
     }, 900);
   });
-  return h('section', { class: 'card' }, ta, status);
+  const stamp = () => `\n${new Date().toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} — `;
+  return h('section', { class: 'card' },
+    h('div', { class: 'tools' },
+      h('button', { class: 'chip', onclick: () => insertAtCursor(ta, '\n☐ '), text: '☐ Пункт' }),
+      h('button', { class: 'chip', onclick: () => insertAtCursor(ta, stamp()), text: 'Дата й час' }),
+      h('button', { class: 'chip', onclick: async () => { try { await navigator.clipboard.writeText(ta.value); toast('Скопійовано'); } catch { toast('Не вдалося скопіювати'); } }, text: 'Копіювати' })),
+    ta,
+    h('div', { class: 'row' }, status, counter));
 }
 
 /* ---------- старт ---------- */
+applyPrefs();
 state.token = readToken();
+{
+  const q = new URLSearchParams(location.search).get('tab');
+  if (TAB_IDS.includes(q)) state.tab = q;
+}
 render();
 load();
 document.addEventListener('visibilitychange', () => { if (!document.hidden && state.data && state.tab !== 'notes') load(true); });
@@ -530,4 +764,9 @@ setInterval(() => {
   if (document.hidden || !state.token || state.tab === 'notes' || state.compose.sending) return;
   if (standalone && state.mode !== 'gone') load(true);
 }, 15000);
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data && TAB_IDS.includes(e.data.tab)) { state.tab = e.data.tab; state.anim = true; render(); }
+  });
+}
