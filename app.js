@@ -257,7 +257,7 @@ function build() {
       h('strong', { text: 'Зошит відключено від навчальної групи' }),
       h('span', { text: 'Нові дані не надходять. Ваші нотатки, завдання й повідомлення лишаються на цьому телефоні.' }),
       h('button', { onclick: () => { if (confirm('Видалити зошит з цього пристрою разом з нотатками?')) forgetNotebook(); }, text: 'Видалити зошит з пристрою' }))
-      : state.mode === 'offline' ? h('div', { class: 'banner' }, h('span', { text: 'Немає звʼязку. Показано збережені дані.' })) : null,
+      : state.mode === 'offline' ? h('div', { class: 'banner' }, h('span', { text: 'Немає звʼязку. Показано збережені дані.' })) : '',
     h('main', null, state.error ? h('p', { class: 'err', text: state.error }) : null, ({
       attendance: viewAttendance, tasks: viewTasks, materials: viewMessages, notes: viewNotes,
     })[state.tab]()),
