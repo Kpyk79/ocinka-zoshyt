@@ -12,6 +12,7 @@ const LS_SEEN = 'ocinka.seenMsg';
 const LS_CADET = 'ocinka.cadetId';
 const LS_PALETTE = 'ocinka.palette';
 const LS_THEME = 'ocinka.theme';
+const LS_TAB = 'ocinka.tab';
 const LS_REMIND_OFF = 'ocinka.remindOff';
 const LS_REMIND_ASKED = 'ocinka.remindAsked';
 const MAX_FILE = 2.5 * 1024 * 1024;
@@ -361,7 +362,7 @@ function build() {
 }
 function goTab(id) {
   if (state.tab === id) return;
-  state.tab = id; state.anim = true; buzz(8); render();
+  state.tab = id; store.set(LS_TAB, id); state.anim = true; buzz(8); render();
   if (id === 'materials') scrollEnd(); else window.scrollTo(0, 0);
 }
 
@@ -838,8 +839,10 @@ function noteEditor(list, idx) {
 applyPrefs();
 state.token = readToken();
 {
-  const q = new URLSearchParams(location.search).get('tab');
+  // Відкритий розділ запам'ятовується: після оновлення сторінки повертаємось на нього; ?tab=… (сповіщення) має пріоритет.
+  const q = new URLSearchParams(location.search).get('tab'), saved = store.get(LS_TAB);
   if (TAB_IDS.includes(q)) state.tab = q;
+  else if (TAB_IDS.includes(saved)) state.tab = saved;
 }
 render();
 load();
@@ -852,7 +855,7 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
   navigator.serviceWorker.addEventListener('message', (e) => {
     if (e.data && e.data.silence) silenceFromNotification();
-    else if (e.data && TAB_IDS.includes(e.data.tab)) { state.tab = e.data.tab; state.anim = true; render(); }
+    else if (e.data && TAB_IDS.includes(e.data.tab)) { state.tab = e.data.tab; store.set(LS_TAB, e.data.tab); state.anim = true; render(); }
   });
 }
 initSilence();
