@@ -36,7 +36,7 @@ const state = {
   tab: 'attendance', open: null, drafts: {}, loading: false, error: '',
   compose: { text: '', file: null, sending: false }, images: {}, installed: false, hint: null,
   anim: true, sheet: false, sheetFresh: false, push: { on: false, busy: false }, justMarked: null,
-  knownMsg: new Set(), msgReady: false, pushSynced: false, saved: new Set(),
+  knownMsg: new Set(), msgReady: false, pushSynced: false, saved: new Set(), noteOpen: null, noteFocusTitle: false,
 };
 let deferredPrompt = null;
 
@@ -741,26 +741,91 @@ function insertAtCursor(ta, text) {
   ta.focus(); ta.setSelectionRange(pos, pos);
   ta.dispatchEvent(new Event('input'));
 }
-function viewNotes() {
-  const online = state.mode === 'online';
+/* Кілька нотаток із заголовками зберігаються в одному полі на сервері як звичайний текст:
+   «━━━ Заголовок ━━━», під ним текст нотатки. Так вони читабельні й в архіві інструктора,
+   а стара єдина нотатка (без заголовка) відкривається як «Нотатка». */
+const NOTE_HEAD = /^━━━ (.*) ━━━$/;
+const NOTES_LIMIT = 50000;
+function parseNotes(body) {
+  const notes = []; let cur = null; const pre = [];
+  const close = (last) => {
+    if (!cur) return;
+    if (!last && cur.lines.length && cur.lines[cur.lines.length - 1] === '') cur.lines.pop();
+    notes.push({ title: cur.title, text: cur.lines.join('\n') });
+  };
+  for (const line of String(body || '').split('\n')) {
+    const m = line.match(NOTE_HEAD);
+    if (m) { close(false); cur = { title: m[1], lines: [] }; }
+    else if (cur) cur.lines.push(line); else pre.push(line);
+  }
+  close(true);
+  const legacy = pre.join('\n');
+  if (legacy.trim()) notes.unshift({ title: 'Нотатка', text: legacy });
+  return notes;
+}
+const cleanTitle = (t) => String(t || '').replace(/[\r\n━]/g, ' ').trim().slice(0, 60) || 'Без назви';
+function serializeNotes(list) { return list.map((n) => `━━━ ${cleanTitle(n.title)} ━━━\n${n.text}`).join('\n\n'); }
+function currentNotesBody() {
   const local = store.get(LS_NOTE), dirty = store.get(LS_DIRTY) === '1';
   const server = state.data.note || '';
-  const ta = h('textarea', { id: 'notebox', 'aria-label': 'Мої нотатки', placeholder: 'Ваші особисті нотатки. Їх бачите лише ви.', style: 'min-height:46vh' });
-  ta.value = online ? (dirty && local != null ? local : server) : (local != null ? local : server);
-  const status = h('span', { class: 'muted', text: online ? (dirty ? 'Не збережено' : 'Збережено') : 'Зберігається на цьому телефоні' });
-  const counter = h('span', { class: 'muted counter', text: `${ta.value.length} символів` });
-  ta.addEventListener('input', () => {
-    store.set(LS_NOTE, ta.value);
-    counter.textContent = `${ta.value.length} символів`;
-    if (!online) { status.textContent = 'Зберігається на цьому телефоні'; return; }
-    store.set(LS_DIRTY, '1'); status.textContent = 'Збереження…';
-    clearTimeout(noteTimer);
-    noteTimer = setTimeout(async () => {
-      status.textContent = (await syncNote()) ? 'Збережено' : 'Не збережено (немає звʼязку), чернетка на цьому пристрої';
-    }, 900);
-  });
-  const stamp = () => `\n${new Date().toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} — `;
+  return state.mode === 'online' ? (dirty && local != null ? local : server) : (local != null ? local : server);
+}
+function persistNotes(list, status) {
+  const online = state.mode === 'online';
+  store.set(LS_NOTE, serializeNotes(list));
+  if (!online) { if (status) status.textContent = 'Зберігається на цьому телефоні'; return; }
+  store.set(LS_DIRTY, '1'); if (status) status.textContent = 'Збереження…';
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(async () => {
+    const ok = await syncNote();
+    if (status) status.textContent = ok ? 'Збережено' : 'Не збережено (немає звʼязку), чернетка на цьому пристрої';
+  }, 900);
+}
+function viewNotes() {
+  const list = parseNotes(currentNotesBody());
+  if (state.noteOpen != null && !list[state.noteOpen]) state.noteOpen = null;
+  return state.noteOpen == null ? notesList(list) : noteEditor(list, state.noteOpen);
+}
+function notesList(list) {
+  const total = serializeNotes(list).length;
+  const add = () => {
+    if (total > NOTES_LIMIT - 300) return toast('Досягнуто ліміту обсягу нотаток');
+    list.push({ title: `Нотатка ${list.length + 1}`, text: '' });
+    persistNotes(list); state.noteOpen = list.length - 1; state.noteFocusTitle = true; render();
+  };
   return h('section', { class: 'card' },
+    h('div', { class: 'row' }, h('strong', { text: 'Мої нотатки' }), h('span', { class: 'muted', text: list.length ? `${list.length} шт.` : '' })),
+    list.length ? h('div', { class: 'notelist' }, list.map((n, i) => h('button', { class: 'noteitem', onclick: () => { state.noteOpen = i; render(); } },
+      h('strong', { text: n.title }),
+      h('span', { class: 'muted', text: (n.text.trim().split('\n')[0] || 'Порожня нотатка').slice(0, 90) })))) : h('p', { class: 'empty', text: 'Нотаток поки немає. Їх бачите лише ви.' }),
+    h('button', { class: 'pri', onclick: add, text: '＋ Нова нотатка' }));
+}
+function noteEditor(list, idx) {
+  const note = list[idx];
+  const online = state.mode === 'online';
+  const dirty = store.get(LS_DIRTY) === '1';
+  const status = h('span', { class: 'muted', text: online ? (dirty ? 'Не збережено' : 'Збережено') : 'Зберігається на цьому телефоні' });
+  const others = serializeNotes(list.filter((_, i) => i !== idx)).length;
+  const title = h('input', { class: 'notetitle', type: 'text', maxlength: '60', 'aria-label': 'Заголовок нотатки', placeholder: 'Заголовок' });
+  title.value = note.title;
+  const ta = h('textarea', { id: 'notebox', 'aria-label': 'Текст нотатки', placeholder: 'Ваші особисті нотатки. Їх бачите лише ви.', style: 'min-height:42vh',
+    maxlength: String(Math.max(0, NOTES_LIMIT - others - 200)) });
+  ta.value = note.text;
+  const counter = h('span', { class: 'muted counter', text: `${ta.value.length} символів` });
+  title.addEventListener('input', () => { note.title = title.value; persistNotes(list, status); });
+  ta.addEventListener('input', () => { note.text = ta.value; counter.textContent = `${ta.value.length} символів`; persistNotes(list, status); });
+  const back = () => { state.noteOpen = null; render(); };
+  const remove = () => {
+    if (!confirm(`Видалити нотатку «${cleanTitle(note.title)}»?`)) return;
+    list.splice(idx, 1); persistNotes(list); state.noteOpen = null; render();
+  };
+  const stamp = () => `\n${new Date().toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} — `;
+  if (state.noteFocusTitle) { state.noteFocusTitle = false; setTimeout(() => { title.focus(); title.select(); }, 60); }
+  return h('section', { class: 'card' },
+    h('div', { class: 'row' },
+      h('button', { class: 'ghost', onclick: back, text: '← Усі нотатки' }),
+      h('button', { class: 'ghost danger', onclick: remove, text: 'Видалити' })),
+    title,
     h('div', { class: 'tools' },
       h('button', { class: 'chip', onclick: () => insertAtCursor(ta, '\n☐ '), text: '☐ Пункт' }),
       h('button', { class: 'chip', onclick: () => insertAtCursor(ta, stamp()), text: 'Дата й час' }),
