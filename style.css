@@ -206,3 +206,10 @@ nav.tabs svg{width:24px;height:24px;fill:currentColor}
 .hush-btn{background:rgba(255,255,255,.1);color:#f3efe6;border:1px solid rgba(255,255,255,.18);border-radius:99px;min-height:44px;padding:0 18px}
 .hush.done .hush-clock{opacity:.25;transition:opacity 1s}
 @keyframes flicker{0%,100%{transform:scale(1,1) rotate(-1deg)}30%{transform:scale(.94,1.06) rotate(1.5deg)}60%{transform:scale(1.04,.96) rotate(-1.5deg)}}
+
+/* файли й перегляд зображень */
+.fbtns{display:flex;gap:8px;flex-wrap:wrap}
+.file img.zoomable{cursor:zoom-in}
+.lightbox{position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.92);display:grid;place-items:center;animation:fade .2s ease both;touch-action:pinch-zoom}
+.lightbox img{max-width:100%;max-height:100%;object-fit:contain}
+.lightbox-x{position:absolute;top:max(12px,env(safe-area-inset-top));right:12px;width:44px;height:44px;border-radius:50%;border:0;background:rgba(255,255,255,.16);color:#fff;font-size:28px;line-height:1;padding:0}

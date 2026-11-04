@@ -1,6 +1,6 @@
 /* Кешує лише оболонку застосунку; дані зберігаються окремо в localStorage. Також показує нагадування (Web Push). */
-const CACHE = 'zoshyt-v5';
-const SHELL = ['./', 'index.html', 'style.css?v=5', 'app.js?v=5', 'silence.js?v=5', 'icon-192.png', 'icon-512.png'];
+const CACHE = 'zoshyt-v6';
+const SHELL = ['./', 'index.html', 'style.css?v=6', 'app.js?v=6', 'silence.js?v=6', 'files.js?v=6', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => Promise.all(SHELL.map((u) => c.add(new Request(u, { cache: 'reload' }))))).then(() => self.skipWaiting()));

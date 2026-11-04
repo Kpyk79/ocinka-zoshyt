@@ -36,7 +36,7 @@ const state = {
   tab: 'attendance', open: null, drafts: {}, loading: false, error: '',
   compose: { text: '', file: null, sending: false }, images: {}, installed: false, hint: null,
   anim: true, sheet: false, sheetFresh: false, push: { on: false, busy: false }, justMarked: null,
-  knownMsg: new Set(), msgReady: false, pushSynced: false,
+  knownMsg: new Set(), msgReady: false, pushSynced: false, saved: new Set(),
 };
 let deferredPrompt = null;
 
@@ -189,7 +189,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyPrefs
 function readToken() {
   const m = location.hash.match(/t=([A-Za-z0-9]{16,})/);
   if (m) {
-    if (store.get(LS_TOKEN) !== m[1]) store.del(LS_CACHE);
+    if (store.get(LS_TOKEN) !== m[1]) { store.del(LS_CACHE); fdbClear(); }
     store.set(LS_TOKEN, m[1]);
     // У браузері (iPhone) хеш потрібен, щоб «На екран Додому» запам'ятала посилання з токеном.
     if (standalone) history.replaceState(null, '', location.pathname + location.search);
@@ -201,6 +201,7 @@ function readCache() { try { return JSON.parse(store.get(LS_CACHE) || 'null'); }
 function forgetNotebook() {
   [LS_TOKEN, LS_NOTE, LS_DIRTY, LS_CACHE, LS_SEEN, LS_CADET, LS_REMIND_OFF, LS_REMIND_ASKED].forEach(store.del);
   state.token = null; state.data = null; state.mode = 'online'; state.drafts = {}; state.sheet = false;
+  fdbClear();
   render();
 }
 
@@ -218,10 +219,11 @@ async function load(silent) {
       changed = raw !== state.raw;
       state.raw = raw; state.data = d; state.mode = 'online'; state.error = '';
       saveCache(raw);
-      if (store.get(LS_CADET) && store.get(LS_CADET) !== d.cadet.id) { store.del(LS_NOTE); store.del(LS_DIRTY); store.del(LS_SEEN); }
+      if (store.get(LS_CADET) && store.get(LS_CADET) !== d.cadet.id) { store.del(LS_NOTE); store.del(LS_DIRTY); store.del(LS_SEEN); fdbClear(); }
       store.set(LS_CADET, d.cadet.id);
       if (store.get(LS_DIRTY) === '1') syncNote();
       resyncPush();
+      prefetchFiles();
     }
   } catch (e) {
     if (!state.data) state.data = readCache();
@@ -549,7 +551,7 @@ function viewMessages() {
   }
   state.msgReady = true;
   if (online) out.push(composer());
-  else if (state.mode === 'gone') out.push(h('p', { class: 'muted center-text', text: 'Листування закрито: зошит відключено від групи.' }));
+  else if (state.mode === 'gone') out.push(h('p', { class: 'muted center-text', text: 'Листування закрито: зошит відключено від групи. Збережені матеріали залишаються доступними.' }));
   return h('div', { class: 'thread' }, out);
 }
 function bubble(m) {
@@ -565,26 +567,19 @@ function bubble(m) {
     file);
 }
 function fileRow(m) {
-  const img = state.images[m.id];
   const isImage = /^image\//.test(m.file_mime || '');
+  const saved = state.saved.has(m.id);
+  if (isImage && saved && !state.images[m.id]) loadSavedImage(m);
+  const img = state.images[m.id];
+  const available = saved || state.mode === 'online';
   return h('div', { class: 'file' },
-    img ? h('img', { src: img, alt: m.file_name }) : null,
-    h('div', { class: 'row' },
-      h('span', { class: 'fname', text: `${m.file_name} • ${fmtSize(m.file_size || 0)}` }),
-      state.mode === 'online' ? h('button', { onclick: () => openFile(m, isImage), text: isImage && !img ? 'Показати' : 'Завантажити' }) : null));
-}
-async function openFile(m, isImage) {
-  try {
-    const r = await rpc('nb_message_file', { p_token: state.token, p_id: m.id });
-    if (!r) throw new Error('Файл недоступний');
-    const mime = r.mime || 'application/octet-stream';
-    if (isImage && !state.images[m.id]) { state.images[m.id] = `data:${mime};base64,${r.data}`; return render(); }
-    const bytes = Uint8Array.from(atob(r.data), (ch) => ch.charCodeAt(0));
-    const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
-    const a = h('a', { href: url, download: r.name || 'file' });
-    document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-  } catch (e) { toast(e.message || 'Не вдалося відкрити файл'); }
+    img ? h('img', { src: img, alt: m.file_name, class: 'zoomable', onclick: () => showLightbox(img, m.file_name) }) : null,
+    h('span', { class: 'fname', text: `${m.file_name} • ${fmtSize(m.file_size || 0)}` }),
+    available
+      ? h('div', { class: 'fbtns' },
+        h('button', { onclick: () => openFile(m, isImage), text: 'Відкрити' }),
+        h('button', { class: 'ghost', onclick: () => downloadFile(m), text: 'Завантажити' }))
+      : h('span', { class: 'muted', text: 'Файл не збережено на цьому пристрої.' }));
 }
 function autogrow(ta) { ta.style.height = 'auto'; ta.style.height = `${Math.min(ta.scrollHeight, 160)}px`; }
 const QUICK = ['Зрозумів', 'Прибув', 'Потрібна допомога', 'Дякую'];
@@ -796,3 +791,4 @@ if ('serviceWorker' in navigator) {
   });
 }
 initSilence();
+filesLoadSaved();
