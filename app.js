@@ -384,7 +384,8 @@ function sheetView() {
         onclick: () => { if (id === 'auto') store.del(LS_THEME); else store.set(LS_THEME, id); applyPrefs(); render(); },
         text: label,
       })))),
-    gone ? null : reminderRow());
+    gone ? null : reminderRow(),
+    silenceRow());
   return h('div', null, h('div', { class: state.sheetFresh ? 'backdrop fresh' : 'backdrop', onclick: closeSheet }), sheet);
 }
 function reminderRow() {
@@ -420,6 +421,7 @@ async function refreshPush() {
 async function saveSub(sub) {
   const j = sub.toJSON();
   await rpc('nb_save_push', { p_token: state.token, p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth });
+  if (store.get(LS_SILENCE_OFF) === '1') await setSilencePush(false);
 }
 async function subscribePush() {
   const reg = await navigator.serviceWorker.ready;
@@ -789,6 +791,8 @@ setInterval(() => {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
   navigator.serviceWorker.addEventListener('message', (e) => {
-    if (e.data && TAB_IDS.includes(e.data.tab)) { state.tab = e.data.tab; state.anim = true; render(); }
+    if (e.data && e.data.silence) silenceFromNotification();
+    else if (e.data && TAB_IDS.includes(e.data.tab)) { state.tab = e.data.tab; state.anim = true; render(); }
   });
 }
+initSilence();
