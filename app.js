@@ -350,6 +350,7 @@ function build() {
       h('span', { text: 'Нові дані не надходять. Ваші нотатки, завдання й повідомлення лишаються на цьому телефоні.' }),
       h('button', { onclick: () => { if (confirm('Видалити зошит з цього пристрою разом з нотатками?')) forgetNotebook(); }, text: 'Видалити зошит з пристрою' }))
       : state.mode === 'offline' ? h('div', { class: 'banner' }, h('span', { text: 'Немає звʼязку. Показано збережені дані.' })) : null,
+    gone ? null : boardBar(),
     main,
     h('nav', { class: state.anim ? 'tabs anim' : 'tabs' }, tabs.map(([id, label]) => {
       const badge = id === 'materials' && unread > 0 && state.tab !== 'materials' ? h('span', { class: 'badge', text: String(unread) }) : null;
@@ -860,3 +861,4 @@ if ('serviceWorker' in navigator) {
 }
 initSilence();
 filesLoadSaved();
+initBoard();

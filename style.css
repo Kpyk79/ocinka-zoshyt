@@ -220,3 +220,16 @@ nav.tabs svg{width:24px;height:24px;fill:currentColor}
 .noteitem .muted{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 .notetitle{width:100%;font:inherit;font-weight:600;font-size:1.05rem;padding:10px 12px;margin:8px 0;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--fg)}
 .ghost.danger{color:#c0392b}
+
+/* дошка заняття */
+.board{position:fixed;inset:0;z-index:95;background:#0b0e14;color:#fff;display:flex;flex-direction:column;animation:fade .25s ease both}
+.board-top{display:flex;gap:10px;align-items:center;padding:max(10px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) 10px max(14px,env(safe-area-inset-left))}
+.board-live{color:#ff6b6b;font-weight:700;font-size:.85rem;animation:boardPulse 1.6s ease-in-out infinite}
+.board-status{color:rgba(255,255,255,.65);font-size:.85rem;margin-right:auto}
+.board-x{width:44px;height:44px;min-height:0;padding:0;border-radius:50%;border:0;background:rgba(255,255,255,.16);color:#fff;font-size:28px;line-height:1}
+.board-stage{flex:1;min-height:0;display:grid;place-items:center;padding:0 8px max(10px,env(safe-area-inset-bottom));touch-action:pinch-zoom}
+.board-wrap{position:relative;display:inline-block;max-width:100%;max-height:100%;line-height:0}
+.board-wrap img{max-width:calc(100vw - 16px);max-height:calc(100dvh - 76px);display:block;border-radius:8px;user-select:none;-webkit-user-drag:none}
+.board-cv{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.board-bar{border-color:var(--pri)}
+@keyframes boardPulse{50%{opacity:.45}}
