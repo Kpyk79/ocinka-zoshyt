@@ -1,6 +1,6 @@
 /* Кешує лише оболонку застосунку; дані зберігаються окремо в localStorage. Також показує нагадування (Web Push). */
-const CACHE = 'zoshyt-v10';
-const SHELL = ['./', 'index.html', 'style.css?v=10', 'app.js?v=10', 'silence.js?v=10', 'files.js?v=10', 'board.js?v=10', 'icon-192.png', 'icon-512.png'];
+const CACHE = 'zoshyt-v12';
+const SHELL = ['./', 'index.html', 'style.css?v=12', 'app.js?v=12', 'silence.js?v=12', 'files.js?v=12', 'board.js?v=12', 'icon-192.png', 'icon-512.png', 'badge-96.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => Promise.all(SHELL.map((u) => c.add(new Request(u, { cache: 'reload' }))))).then(() => self.skipWaiting()));
@@ -22,7 +22,7 @@ self.addEventListener('push', (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch { /* ignore */ }
   e.waitUntil(self.registration.showNotification(d.title || 'Зошит', {
-    body: d.body || 'Відкрийте зошит.', icon: 'icon-192.png', badge: 'icon-192.png', tag: d.tag || 'hw-reminder', renotify: true,
+    body: d.body || 'Відкрийте зошит.', icon: 'icon-192.png', badge: 'badge-96.png', tag: d.tag || 'hw-reminder', renotify: true,
     requireInteraction: d.tag === 'silence',
     data: { url: d.url || './?tab=tasks', msg: d.msg || { tab: 'tasks' } },
   }));

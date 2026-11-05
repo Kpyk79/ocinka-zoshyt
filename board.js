@@ -7,6 +7,7 @@ const SB_REALTIME_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.
 const board = {
   active: false, id: null, room: null, rev: -1, img: null, strokes: new Map(), undone: new Set(),
   live: false, channel: null, client: null, view: null, autoFor: null, polling: false, endTimer: null,
+  imgRev: 0, zoom: null,
 };
 
 function loadSupabaseJs() {
@@ -37,7 +38,7 @@ function loadSnapshot(list) {
 
 async function boardJoin(b) {
   boardLeave();
-  board.id = b.id; board.room = b.room; board.rev = b.rev; board.undone = new Set();
+  board.id = b.id; board.room = b.room; board.rev = b.rev; board.undone = new Set(); board.imgRev = b.img_rev || 0; board.zoom = b.view || null;
   loadSnapshot(b.strokes);
   const im = await rpc('nb_board_image', { p_token: state.token, p_id: b.id });
   if (!im) return;
@@ -50,10 +51,29 @@ async function boardJoin(b) {
 
 /* Без живого каналу беремо штрихи зі знімка в базі (він оновлюється приблизно раз на 1,5 с). */
 function boardSync(b) {
+  if ((b.img_rev || 0) !== board.imgRev) { boardReloadImage(b.img_rev || 0, b); return; }
   if (board.live || b.rev === board.rev) return;
   board.rev = b.rev;
   loadSnapshot(b.strokes);
+  board.zoom = b.view || null;
+  boardApplyView();
   boardDraw();
+}
+
+/* Інструктор замінив скріншот у тому ж занятті: беремо нову картинку, штрихи й масштаб починаються заново. */
+async function boardReloadImage(n, snap) {
+  if (board.imgRev === n && !snap) return;
+  try {
+    const im = await rpc('nb_board_image', { p_token: state.token, p_id: board.id });
+    if (!im) return;
+    board.imgRev = n; board.undone = new Set();
+    board.img = `data:${im.mime || 'image/jpeg'};base64,${im.data}`;
+    board.zoom = snap ? (snap.view || null) : null;
+    loadSnapshot(snap ? snap.strokes : []);
+    if (snap) board.rev = snap.rev;
+    if (board.view) board.view.img.src = board.img;
+    boardApplyView(); boardDraw();
+  } catch { /* повторимо під час наступного опитування */ }
 }
 
 function boardLeave() {
@@ -101,6 +121,8 @@ function boardApply(m) {
     if (!old || (m.s.p || []).length >= (old.p || []).length) board.strokes.set(m.s.id, m.s);
   } else if (m.t === 'u') { board.undone.add(m.id); board.strokes.delete(m.id); }
   else if (m.t === 'x') { board.strokes.clear(); }
+  else if (m.t === 'v') { board.zoom = { z: m.z, x: m.x, y: m.y }; boardApplyView(); return; }
+  else if (m.t === 'i') { boardReloadImage(m.n); return; }
   else if (m.t === 'e') { boardEnded(); return; }
   boardDraw();
 }
@@ -125,6 +147,9 @@ function boardDrawStroke(g, s, W, H) {
   } else if (s.k === 'circle' && p.length >= 4) {
     const l = Math.min(p[0], p[2]) * W, t = Math.min(p[1], p[3]) * H, rw = Math.abs(p[2] - p[0]) * W, rh = Math.abs(p[3] - p[1]) * H;
     if (rw > 1 || rh > 1) { g.beginPath(); g.ellipse(l + rw / 2, t + rh / 2, rw / 2, rh / 2, 0, 0, Math.PI * 2); g.stroke(); }
+  } else if (s.k === 'rect' && p.length >= 4) {
+    const l = Math.min(p[0], p[2]) * W, t = Math.min(p[1], p[3]) * H, rw = Math.abs(p[2] - p[0]) * W, rh = Math.abs(p[3] - p[1]) * H;
+    if (rw > 1 || rh > 1) g.strokeRect(l, t, rw, rh);
   } else if (s.k === 'text' && p.length >= 2 && s.t) {
     const size = Math.max(10, (s.s || 0.045) * W);
     const n = parseInt(col.replace('#', ''), 16) || 0;
@@ -141,13 +166,26 @@ function boardDrawStroke(g, s, W, H) {
 function boardDraw() {
   const v = board.view;
   if (!v) return;
-  const r = v.img.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-  const W = Math.max(1, Math.round(r.width)), H = Math.max(1, Math.round(r.height));
-  if (v.canvas.width !== Math.round(W * dpr) || v.canvas.height !== Math.round(H * dpr)) { v.canvas.width = Math.round(W * dpr); v.canvas.height = Math.round(H * dpr); }
+  const W = Math.max(1, v.img.offsetWidth), H = Math.max(1, v.img.offsetHeight); // розмір без урахування масштабу інструктора
+  const z = board.zoom && board.zoom.z > 1 ? board.zoom.z : 1;
+  const ratio = Math.min((window.devicePixelRatio || 1) * z, 4096 / Math.max(W, H)); // чіткі лінії при збільшенні
+  const cw = Math.round(W * ratio), ch = Math.round(H * ratio);
+  if (v.canvas.width !== cw || v.canvas.height !== ch) { v.canvas.width = cw; v.canvas.height = ch; }
   const g = v.canvas.getContext('2d');
-  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  g.setTransform(ratio, 0, 0, ratio, 0, 0); g.clearRect(0, 0, W, H);
   g.lineCap = 'round'; g.lineJoin = 'round';
   for (const s of board.strokes.values()) boardDrawStroke(g, s, W, H);
+}
+
+/* Масштаб і положення, як у інструктора: z — збільшення, (x, y) — точка зображення в центрі екрана. */
+function boardApplyView() {
+  const v = board.view;
+  if (!v) return;
+  const z = board.zoom && board.zoom.z > 1 ? board.zoom.z : 1;
+  const W = v.wrap.offsetWidth, H = v.wrap.offsetHeight;
+  const x = board.zoom ? board.zoom.x : 0.5, y = board.zoom ? board.zoom.y : 0.5;
+  v.wrap.style.transform = z > 1 ? `translate(${(-z * (x - 0.5) * W).toFixed(1)}px, ${(-z * (y - 0.5) * H).toFixed(1)}px) scale(${z})` : '';
+  boardDraw();
 }
 
 /* ---------- екран дошки ---------- */
@@ -182,11 +220,11 @@ function openBoard() {
       h('button', { class: 'board-x', 'aria-label': 'Закрити дошку', onclick: closeBoard, text: '×' })),
     h('div', { class: 'board-stage' }, wrap));
   document.body.append(root);
-  board.view = { root, img, canvas, status, ro: null };
-  img.onload = boardDraw;
+  board.view = { root, img, canvas, status, wrap, ro: null };
+  img.onload = boardApplyView;
   img.src = board.img;
-  if (window.ResizeObserver) { board.view.ro = new ResizeObserver(boardDraw); board.view.ro.observe(wrap); }
-  window.addEventListener('resize', boardDraw);
+  if (window.ResizeObserver) { board.view.ro = new ResizeObserver(boardApplyView); board.view.ro.observe(wrap); }
+  window.addEventListener('resize', boardApplyView);
   boardStatus();
   boardKeepAwake();
   render();
@@ -197,7 +235,7 @@ function closeBoard() {
   if (!v) return;
   clearTimeout(board.endTimer);
   if (v.ro) v.ro.disconnect();
-  window.removeEventListener('resize', boardDraw);
+  window.removeEventListener('resize', boardApplyView);
   v.root.remove(); board.view = null;
   boardRelease();
   render();
