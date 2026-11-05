@@ -156,6 +156,20 @@ function boardStatus(text) {
   board.view.status.textContent = text || (board.live ? 'наживо' : 'оновлюється кожні кілька секунд');
 }
 
+/* Поки відкрита дошка, екран не гасне (система знімає блокування, коли сторінка згортається, тож беремо його знову). */
+let boardWake = null;
+async function boardKeepAwake() {
+  try {
+    if (!('wakeLock' in navigator) || boardWake || !board.view || document.hidden) return;
+    boardWake = await navigator.wakeLock.request('screen');
+    boardWake.addEventListener('release', () => { boardWake = null; });
+  } catch { /* не підтримується або відмовлено */ }
+}
+function boardRelease() {
+  try { if (boardWake) boardWake.release(); } catch { /* ignore */ }
+  boardWake = null;
+}
+
 function openBoard() {
   if (board.view || !board.active || !board.img) return;
   const img = h('img', { alt: 'Дошка заняття', draggable: 'false' });
@@ -174,6 +188,7 @@ function openBoard() {
   if (window.ResizeObserver) { board.view.ro = new ResizeObserver(boardDraw); board.view.ro.observe(wrap); }
   window.addEventListener('resize', boardDraw);
   boardStatus();
+  boardKeepAwake();
   render();
 }
 
@@ -184,6 +199,7 @@ function closeBoard() {
   if (v.ro) v.ro.disconnect();
   window.removeEventListener('resize', boardDraw);
   v.root.remove(); board.view = null;
+  boardRelease();
   render();
 }
 
@@ -197,6 +213,6 @@ function boardBar() {
 
 function initBoard() {
   setInterval(() => { if (!document.hidden) pollBoard(); }, 5000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) pollBoard(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { pollBoard(); boardKeepAwake(); } });
   pollBoard();
 }

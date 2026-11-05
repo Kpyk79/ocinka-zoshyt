@@ -394,7 +394,7 @@ function sheetView() {
 }
 function reminderRow() {
   const p = state.push;
-  let sub = 'Щодня о 20:00, якщо є невиконане домашнє завдання.';
+  let sub = 'Щодня о 19:00, якщо є невиконане домашнє завдання.';
   let disabled = p.busy;
   if (!pushSupported) {
     sub = isIOS && !standalone ? 'На iPhone працює після додавання на екран «Додому».' : 'Цей браузер не підтримує сповіщення.';
@@ -446,7 +446,7 @@ async function resyncPush() {
         if (store.get(LS_REMIND_ASKED) === '1' || store.get(LS_REMIND_OFF) === '1') return;
         store.set(LS_REMIND_ASKED, '1');
         try {
-          if ((await Notification.requestPermission()) === 'granted') { await subscribePush(); state.push.on = true; toast('Нагадування про завдання увімкнено: щодня о 20:00'); }
+          if ((await Notification.requestPermission()) === 'granted') { await subscribePush(); state.push.on = true; toast('Нагадування про завдання увімкнено: щодня о 19:00'); }
         } catch { /* ігноруємо */ }
       }, { once: true, capture: true });
     }
@@ -466,7 +466,7 @@ async function toggleReminders() {
       if (perm !== 'granted') throw new Error('Дозвіл на сповіщення не надано');
       await subscribePush();
       store.del(LS_REMIND_OFF); store.set(LS_REMIND_ASKED, '1');
-      p.on = true; buzz(20); toast('Нагадування увімкнено: щодня о 20:00');
+      p.on = true; buzz(20); toast('Нагадування увімкнено: щодня о 19:00');
     }
   } catch (e) { toast(e.message || 'Не вдалося змінити нагадування'); }
   p.busy = false; render();
@@ -855,7 +855,8 @@ setInterval(() => {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
   navigator.serviceWorker.addEventListener('message', (e) => {
-    if (e.data && e.data.silence) silenceFromNotification();
+    if (e.data && e.data.board) { board.autoFor = null; pollBoard(); }
+    else if (e.data && e.data.silence) silenceFromNotification();
     else if (e.data && TAB_IDS.includes(e.data.tab)) { state.tab = e.data.tab; store.set(LS_TAB, e.data.tab); state.anim = true; render(); }
   });
 }
