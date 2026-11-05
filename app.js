@@ -799,8 +799,13 @@ function notesList(list) {
     h('div', { class: 'row' }, h('strong', { text: 'Мої нотатки' }), h('span', { class: 'muted', text: list.length ? `${list.length} шт.` : '' })),
     list.length ? h('div', { class: 'notelist' }, list.map((n, i) => h('button', { class: 'noteitem', onclick: () => { state.noteOpen = i; render(); } },
       h('strong', { text: n.title }),
-      h('span', { class: 'muted', text: (n.text.trim().split('\n')[0] || 'Порожня нотатка').slice(0, 90) })))) : h('p', { class: 'empty', text: 'Нотаток поки немає. Їх бачите лише ви.' }),
+      h('span', { class: 'muted', text: notePreview(n.text) })))) : h('p', { class: 'empty', text: 'Нотаток поки немає. Їх бачите лише ви.' }),
     h('button', { class: 'pri', onclick: add, text: '＋ Нова нотатка' }));
+}
+function notePreview(text) {
+  const sp = splitPhotos(text);
+  const first = sp.body.trim().split('\n')[0] || (sp.ids.length ? '' : 'Порожня нотатка');
+  return (first.slice(0, 80) + (sp.ids.length ? `  📷 ${sp.ids.length}` : '')).trim();
 }
 function noteEditor(list, idx) {
   const note = list[idx];
@@ -812,14 +817,57 @@ function noteEditor(list, idx) {
   title.value = note.title;
   const ta = h('textarea', { id: 'notebox', 'aria-label': 'Текст нотатки', placeholder: 'Ваші особисті нотатки. Їх бачите лише ви.', style: 'min-height:42vh',
     maxlength: String(Math.max(0, NOTES_LIMIT - others - 200)) });
-  ta.value = note.text;
+  const split = splitPhotos(note.text);
+  let ids = split.ids;
+  ta.value = split.body;
   const counter = h('span', { class: 'muted counter', text: `${ta.value.length} символів` });
-  title.addEventListener('input', () => { note.title = title.value; persistNotes(list, status); });
-  ta.addEventListener('input', () => { note.text = ta.value; counter.textContent = `${ta.value.length} символів`; persistNotes(list, status); });
-  const back = () => { state.noteOpen = null; render(); };
-  const remove = () => {
+  const commit = () => { note.text = joinPhotos(ta.value, ids); persistNotes(list, status); };
+  title.addEventListener('input', () => { note.title = title.value; commit(); });
+  ta.addEventListener('input', () => { counter.textContent = `${ta.value.length} символів`; commit(); });
+
+  // фото нотатки: зберігаються на телефоні, у тексті лишається позначка
+  const photosBox = h('div', { class: 'notephotos' });
+  const paintPhotos = () => {
+    photosBox.replaceChildren(...ids.map((id) => {
+      const img = h('img', { alt: 'Фото в нотатці' });
+      const wrap = h('div', { class: 'nphoto' }, img,
+        h('button', { class: 'nphoto-x', 'aria-label': 'Прибрати фото', onclick: (e) => { e.stopPropagation(); removePhoto(id); }, text: '×' }));
+      notePhotoUrl(id).then((u) => {
+        if (u) { img.src = u; img.onclick = () => showLightbox(u, 'Фото нотатки'); }
+        else { img.remove(); wrap.classList.add('missing'); wrap.prepend('Фото немає на цьому телефоні'); }
+      });
+      return wrap;
+    }));
+    photosBox.hidden = !ids.length;
+  };
+  const addPhoto = async (file) => {
+    if (!file) return;
+    try { ids = ids.concat(await saveNotePhoto(file)); commit(); paintPhotos(); toast('Фото додано'); }
+    catch { toast('Не вдалося додати фото'); }
+  };
+  const removePhoto = async (id) => {
+    if (!confirm('Прибрати це фото з нотатки?')) return;
+    ids = ids.filter((x) => x !== id); await deleteNotePhoto(id); commit(); paintPhotos();
+  };
+  const picker = (capture) => h('input', { type: 'file', accept: 'image/*', capture: capture ? 'environment' : null, hidden: true,
+    onchange: async (e) => { const f = e.target.files[0]; e.target.value = ''; await addPhoto(f); } });
+  const camInput = picker(true), galInput = picker(false);
+  paintPhotos();
+
+  const back = () => { clearTimeout(noteTimer); if (store.get(LS_DIRTY) === '1' && state.mode === 'online') syncNote(); state.noteOpen = null; render(); };
+  const remove = async () => {
     if (!confirm(`Видалити нотатку «${cleanTitle(note.title)}»?`)) return;
+    for (const id of ids) await deleteNotePhoto(id);
     list.splice(idx, 1); persistNotes(list); state.noteOpen = null; render();
+  };
+  const save = async () => {
+    clearTimeout(noteTimer);
+    store.set(LS_NOTE, serializeNotes(list));
+    if (state.mode !== 'online') { status.textContent = 'Зберігається на цьому телефоні'; toast('Нотатку збережено на телефоні'); return; }
+    store.set(LS_DIRTY, '1'); status.textContent = 'Збереження…';
+    const ok = await syncNote();
+    status.textContent = ok ? 'Збережено' : 'Не збережено (немає звʼязку), чернетка на цьому пристрої';
+    toast(ok ? 'Нотатку збережено' : 'Збережено на телефоні, відправимо, коли зʼявиться звʼязок');
   };
   const stamp = () => `\n${new Date().toLocaleString('uk-UA', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} — `;
   if (state.noteFocusTitle) { state.noteFocusTitle = false; setTimeout(() => { title.focus(); title.select(); }, 60); }
@@ -831,9 +879,14 @@ function noteEditor(list, idx) {
     h('div', { class: 'tools' },
       h('button', { class: 'chip', onclick: () => insertAtCursor(ta, '\n☐ '), text: '☐ Пункт' }),
       h('button', { class: 'chip', onclick: () => insertAtCursor(ta, stamp()), text: 'Дата й час' }),
+      h('button', { class: 'chip', onclick: () => camInput.click(), text: '📷 Зробити фото' }),
+      h('button', { class: 'chip', onclick: () => galInput.click(), text: '🖼 Фото з галереї' }),
       h('button', { class: 'chip', onclick: async () => { try { await navigator.clipboard.writeText(ta.value); toast('Скопійовано'); } catch { toast('Не вдалося скопіювати'); } }, text: 'Копіювати' })),
+    camInput, galInput,
     ta,
-    h('div', { class: 'row' }, status, counter));
+    photosBox,
+    h('div', { class: 'row' }, status, counter),
+    h('button', { class: 'pri big', onclick: save, text: 'Зберегти' }));
 }
 
 /* ---------- старт ---------- */

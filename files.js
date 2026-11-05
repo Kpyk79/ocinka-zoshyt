@@ -26,6 +26,7 @@ async function fileTx(mode, fn) {
 }
 const fdbGet = (id) => fileTx('readonly', (s) => s.get(id)).catch(() => null);
 const fdbPut = (id, rec) => fileTx('readwrite', (s) => s.put(rec, id));
+const fdbDel = (id) => fileTx('readwrite', (s) => s.delete(id)).catch(() => {});
 const fdbKeys = () => fileTx('readonly', (s) => s.getAllKeys()).catch(() => []);
 function fdbClear() { if (state.saved) state.saved.clear(); return fileTx('readwrite', (s) => s.clear()).catch(() => {}); }
 
