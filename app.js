@@ -879,7 +879,11 @@ function noteEditor(list, idx) {
     h('div', { class: 'tools' },
       h('button', { class: 'chip', onclick: () => insertAtCursor(ta, '\n☐ '), text: '☐ Пункт' }),
       h('button', { class: 'chip', onclick: () => insertAtCursor(ta, stamp()), text: 'Дата й час' }),
-      h('button', { class: 'chip', onclick: () => camInput.click(), text: '📷 Зробити фото' }),
+      h('button', { class: 'chip', onclick: async () => {
+        // власна камера; якщо вона недоступна (немає дозволу чи API), відкриваємо звичайний вибір файлу
+        try { const f = await takePhoto(); if (f) await addPhoto(f); }
+        catch { toast('Камера недоступна, оберіть фото'); camInput.click(); }
+      }, text: '📷 Зробити фото' }),
       h('button', { class: 'chip', onclick: () => galInput.click(), text: '🖼 Фото з галереї' }),
       h('button', { class: 'chip', onclick: async () => { try { await navigator.clipboard.writeText(ta.value); toast('Скопійовано'); } catch { toast('Не вдалося скопіювати'); } }, text: 'Копіювати' })),
     camInput, galInput,

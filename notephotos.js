@@ -53,3 +53,38 @@ async function deleteNotePhoto(id) {
   delete noteImgUrls[id];
   await fdbDel('np:' + id);
 }
+
+/* ---------- власна камера ----------
+   Атрибут capture у вбудованих застосунках (PWA) часто ігнорується, і замість камери відкривається галерея.
+   Тому знімаємо самі через getUserMedia; якщо камера недоступна, пропонуємо звичайний вибір файлу. */
+function takePhoto() {
+  return new Promise(async (resolve, reject) => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return reject(new Error('no camera api'));
+    let facing = 'environment', stream = null;
+    const video = h('video', { class: 'cam-video', playsinline: '', autoplay: '', muted: '' });
+    video.muted = true;
+    const stop = () => { if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null; };
+    const start = async () => {
+      stop();
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: facing }, width: { ideal: 1920 }, height: { ideal: 1440 } }, audio: false });
+      video.srcObject = stream;
+      await video.play();
+    };
+    const close = (file) => { stop(); root.remove(); resolve(file || null); };
+    const shoot = () => {
+      if (!video.videoWidth) return;
+      const c = document.createElement('canvas');
+      c.width = video.videoWidth; c.height = video.videoHeight;
+      c.getContext('2d').drawImage(video, 0, 0);
+      c.toBlob((b) => close(b ? new File([b], 'foto.jpg', { type: 'image/jpeg' }) : null), 'image/jpeg', 0.9);
+    };
+    const root = h('div', { class: 'cam', role: 'dialog', 'aria-label': 'Камера' },
+      video,
+      h('div', { class: 'cam-bar' },
+        h('button', { class: 'cam-btn', onclick: () => close(null), text: 'Скасувати' }),
+        h('button', { class: 'cam-shot', 'aria-label': 'Зробити знімок', onclick: shoot }),
+        h('button', { class: 'cam-btn', onclick: async () => { facing = facing === 'environment' ? 'user' : 'environment'; try { await start(); } catch { /* лишаємо як є */ } }, text: 'Інша камера' })));
+    document.body.append(root);
+    try { await start(); } catch (e) { stop(); root.remove(); reject(e); }
+  });
+}
